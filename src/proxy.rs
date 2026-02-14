@@ -62,6 +62,7 @@ pub struct RpcRequest {
     #[serde(default)]
     pub id: Value,
     #[serde(default)]
+    #[allow(dead_code)]
     pub jsonrpc: Option<String>,
 }
 
@@ -92,9 +93,6 @@ pub enum ProxyError {
     #[error("Backend error: {0}")]
     BackendError(String),
 
-    #[error("Invalid request: {0}")]
-    InvalidRequest(String),
-
     #[error("Authentication failed")]
     AuthFailed,
 
@@ -110,7 +108,6 @@ impl IntoResponse for ProxyError {
             }
             ProxyError::InvalidParams(m) => (StatusCode::OK, -32602, m.clone()),
             ProxyError::BackendError(m) => (StatusCode::OK, -32603, format!("Internal error: {}", m)),
-            ProxyError::InvalidRequest(m) => (StatusCode::OK, -32600, m.clone()),
             ProxyError::AuthFailed => (StatusCode::UNAUTHORIZED, -32001, "Invalid credentials".to_string()),
             ProxyError::IpNotAllowed(ip) => {
                 (StatusCode::FORBIDDEN, -32002, format!("IP {} not allowed for authenticated access", ip))
