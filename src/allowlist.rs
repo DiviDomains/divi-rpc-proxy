@@ -32,7 +32,6 @@ pub static ALLOWED_METHODS: LazyLock<HashSet<&'static str>> = LazyLock::new(|| {
         "verifychain",
         "getlotteryblockwinners",
         "reverseblocktransactions",
-
         // === Network info (read-only) ===
         "getconnectioncount",
         "getnettotals",
@@ -63,12 +62,10 @@ pub static ALLOWED_METHODS: LazyLock<HashSet<&'static str>> = LazyLock::new(|| {
         "getaddresstxids",
         "getaddressutxos",
         "getspentinfo",
-
         // === Utility (read-only) ===
         "validateaddress",
         "verifymessage",
         "createmultisig",
-
         // === Masternode info (read-only) ===
         "getmasternodecount",
         "getmasternodestatus",

@@ -15,7 +15,9 @@ use std::sync::Arc;
 use thiserror::Error;
 use tracing::{debug, info, warn};
 
-use crate::allowlist::{is_method_allowed, needs_param_validation, validate_params, ALLOWED_METHODS};
+use crate::allowlist::{
+    is_method_allowed, needs_param_validation, validate_params, ALLOWED_METHODS,
+};
 use crate::config::{Backend, Config};
 
 /// Application state shared across handlers
@@ -107,11 +109,19 @@ impl IntoResponse for ProxyError {
                 (StatusCode::OK, -32601, format!("Method not allowed: {}", m))
             }
             ProxyError::InvalidParams(m) => (StatusCode::OK, -32602, m.clone()),
-            ProxyError::BackendError(m) => (StatusCode::OK, -32603, format!("Internal error: {}", m)),
-            ProxyError::AuthFailed => (StatusCode::UNAUTHORIZED, -32001, "Invalid credentials".to_string()),
-            ProxyError::IpNotAllowed(ip) => {
-                (StatusCode::FORBIDDEN, -32002, format!("IP {} not allowed for authenticated access", ip))
+            ProxyError::BackendError(m) => {
+                (StatusCode::OK, -32603, format!("Internal error: {}", m))
             }
+            ProxyError::AuthFailed => (
+                StatusCode::UNAUTHORIZED,
+                -32001,
+                "Invalid credentials".to_string(),
+            ),
+            ProxyError::IpNotAllowed(ip) => (
+                StatusCode::FORBIDDEN,
+                -32002,
+                format!("IP {} not allowed for authenticated access", ip),
+            ),
         };
 
         let response = RpcResponse {
@@ -217,7 +227,10 @@ pub async fn handle_rpc(
     // Check parameter restrictions for special methods
     if needs_param_validation(method) {
         if let Err(reason) = validate_params(method, &request.params) {
-            warn!("Blocked params for {} from {}: {}", method, client_ip, reason);
+            warn!(
+                "Blocked params for {} from {}: {}",
+                method, client_ip, reason
+            );
             return Err(ProxyError::InvalidParams(reason.to_string()));
         }
     }
@@ -296,28 +309,31 @@ pub async fn handle_health(State(state): State<Arc<AppState>>) -> impl IntoRespo
         .await;
 
     match result {
-        Ok(response) if response.status().is_success() => {
-            (StatusCode::OK, Json(json!({
+        Ok(response) if response.status().is_success() => (
+            StatusCode::OK,
+            Json(json!({
                 "status": "healthy",
                 "network": state.config.default_backend.network,
                 "backend": "connected"
-            })))
-        }
-        Ok(response) => {
-            (StatusCode::SERVICE_UNAVAILABLE, Json(json!({
+            })),
+        ),
+        Ok(response) => (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(json!({
                 "status": "unhealthy",
                 "network": state.config.default_backend.network,
                 "backend": "error",
                 "details": format!("Backend returned status {}", response.status())
-            })))
-        }
-        Err(e) => {
-            (StatusCode::SERVICE_UNAVAILABLE, Json(json!({
+            })),
+        ),
+        Err(e) => (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(json!({
                 "status": "unhealthy",
                 "network": state.config.default_backend.network,
                 "backend": "disconnected",
                 "details": e.to_string()
-            })))
-        }
+            })),
+        ),
     }
 }

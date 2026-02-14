@@ -61,7 +61,12 @@ struct Args {
 
     /// IP addresses allowed for authenticated access (comma-separated)
     /// Default: 127.0.0.1
-    #[arg(long, env = "AUTH_IP_WHITELIST", value_delimiter = ',', default_value = "127.0.0.1")]
+    #[arg(
+        long,
+        env = "AUTH_IP_WHITELIST",
+        value_delimiter = ',',
+        default_value = "127.0.0.1"
+    )]
     auth_ip_whitelist: Vec<IpAddr>,
 }
 
@@ -84,12 +89,15 @@ fn parse_auth_backend(spec: &str, network: &str) -> Option<(String, Backend)> {
     let url = parts[1].to_string();
     let key = Config::make_credentials_key(&user, &password);
 
-    Some((key, Backend {
-        url,
-        user,
-        password,
-        network: network.to_string(),
-    }))
+    Some((
+        key,
+        Backend {
+            url,
+            user,
+            password,
+            network: network.to_string(),
+        },
+    ))
 }
 
 #[tokio::main]
@@ -105,19 +113,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let args = Args::parse();
 
-    info!(
-        "Starting DIVI RPC Proxy for {} network",
-        args.network
-    );
+    info!("Starting DIVI RPC Proxy for {} network", args.network);
     info!("Default backend: {}", args.backend_url);
     info!(
         "Allowed public methods: {} read-only methods",
         allowlist::ALLOWED_METHODS.len()
     );
-    info!(
-        "Auth IP whitelist: {:?}",
-        args.auth_ip_whitelist
-    );
+    info!("Auth IP whitelist: {:?}", args.auth_ip_whitelist);
 
     // Build default backend
     let default_backend = Backend {
@@ -132,12 +134,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Add default backend credentials as an authenticated backend too
     // This allows local services to use the same credentials for full access
-    let default_key = Config::make_credentials_key(&default_backend.user, &default_backend.password);
+    let default_key =
+        Config::make_credentials_key(&default_backend.user, &default_backend.password);
     authenticated_backends.insert(default_key.clone(), default_backend.clone());
 
     for spec in &args.auth_backends {
         if let Some((key, backend)) = parse_auth_backend(spec, &args.network) {
-            info!("Registered auth backend: {} -> {}", backend.user, backend.url);
+            info!(
+                "Registered auth backend: {} -> {}",
+                backend.user, backend.url
+            );
             authenticated_backends.insert(key, backend);
         }
     }
@@ -177,7 +183,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     axum::serve(
         listener,
         app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
-    ).await?;
+    )
+    .await?;
 
     Ok(())
 }
