@@ -10,7 +10,8 @@ use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddr};
+use std::str::FromStr;
 use std::sync::Arc;
 use thiserror::Error;
 use tracing::{debug, info, warn};
@@ -134,6 +135,32 @@ impl IntoResponse for ProxyError {
     }
 }
 
+/// Extract real client IP from X-Forwarded-For header or connection address
+/// X-Forwarded-For format: "client, proxy1, proxy2, ..."
+/// We take the first (leftmost) IP as the original client
+fn get_real_client_ip(headers: &HeaderMap, conn_addr: IpAddr) -> IpAddr {
+    // Try X-Forwarded-For header first
+    if let Some(xff) = headers.get("x-forwarded-for") {
+        if let Ok(xff_str) = xff.to_str() {
+            // Take the first IP in the chain (original client)
+            if let Some(first_ip) = xff_str.split(',').next() {
+                let trimmed = first_ip.trim();
+                if let Ok(ip) = IpAddr::from_str(trimmed) {
+                    debug!(
+                        "Using X-Forwarded-For IP: {} (full header: {})",
+                        ip, xff_str
+                    );
+                    return ip;
+                }
+            }
+        }
+    }
+
+    // Fall back to connection address
+    debug!("Using connection IP: {}", conn_addr);
+    conn_addr
+}
+
 /// Parse Basic auth header and extract credentials
 fn parse_basic_auth(headers: &HeaderMap) -> Option<(String, String)> {
     let auth_header = headers.get("authorization")?.to_str().ok()?;
@@ -162,7 +189,8 @@ pub async fn handle_rpc(
     Json(request): Json<RpcRequest>,
 ) -> Result<impl IntoResponse, ProxyError> {
     let method = request.method.as_str();
-    let client_ip = addr.ip();
+    // Get real client IP (respects X-Forwarded-For from reverse proxy)
+    let client_ip = get_real_client_ip(&headers, addr.ip());
 
     debug!("RPC request from {}: method={}", client_ip, method);
 
