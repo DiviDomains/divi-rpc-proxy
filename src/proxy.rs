@@ -382,8 +382,7 @@ pub async fn handle_info(State(state): State<Arc<AppState>>) -> impl IntoRespons
         "public_methods": methods,
         "authenticated_access": {
             "description": "Provide Basic auth credentials matching a registered backend for full RPC access",
-            "ip_restricted": true,
-            "allowed_ips": state.config.auth_ip_whitelist
+            "ip_restricted": true
         },
         "usage": {
             "method": "POST",
