@@ -1,0 +1,40 @@
+# DIVI RPC Proxy HAProxy Configuration
+#
+# Replace the existing divi_testnet_rpc_backends and divi_mainnet_rpc_backends
+# sections with these updated versions that point to the filtering proxy.
+#
+# The proxy handles authentication and method filtering, so HAProxy
+# no longer needs credentials or direct backend access.
+
+# ============================================
+# TESTNET - Replace existing backend section
+# ============================================
+
+backend divi_testnet_rpc_backends
+    mode http
+    # Single backend - the filtering proxy handles load balancing internally if needed
+    # No authentication needed - proxy is on localhost
+    option httpchk GET /health
+    http-check expect status 200
+    server rpc-proxy 127.0.0.1:17081 check inter 5s
+
+# ============================================
+# MAINNET - Replace existing backend section
+# ============================================
+
+backend divi_mainnet_rpc_backends
+    mode http
+    option httpchk GET /health
+    http-check expect status 200
+    server rpc-proxy 127.0.0.1:18081 check inter 5s
+
+
+# ============================================
+# IMPORTANT: Remove these from health checks
+# ============================================
+#
+# The old config had credentials in the health check:
+#   http-check send ... hdr Authorization "Basic cHJpdmF0ZWRpdmk6..."
+#
+# This is no longer needed since the proxy handles authentication.
+# The proxy's /health endpoint doesn't require auth.

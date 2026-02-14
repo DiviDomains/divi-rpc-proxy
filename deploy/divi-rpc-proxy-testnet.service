@@ -1,0 +1,32 @@
+[Unit]
+Description=DIVI RPC Filtering Proxy (Testnet)
+After=network.target privatedivi-testnet-node1.service
+Wants=privatedivi-testnet-node1.service
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+ExecStart=/usr/local/bin/divi-rpc-proxy \
+    --listen-addr 127.0.0.1 \
+    --listen-port 17081 \
+    --backend-url http://127.0.0.1:52591 \
+    --rpc-user privatedivi \
+    --rpc-password ${RPC_PASSWORD_TESTNET} \
+    --network testnet
+
+EnvironmentFile=/etc/divi-rpc-proxy/testnet.env
+Restart=always
+RestartSec=5
+
+# Security hardening
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+
+[Install]
+WantedBy=multi-user.target
