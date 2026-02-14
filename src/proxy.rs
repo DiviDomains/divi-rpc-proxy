@@ -181,66 +181,47 @@ fn parse_basic_auth(headers: &HeaderMap) -> Option<(String, String)> {
     }
 }
 
-/// Handle incoming RPC requests
-pub async fn handle_rpc(
-    State(state): State<Arc<AppState>>,
-    ConnectInfo(addr): ConnectInfo<SocketAddr>,
-    headers: HeaderMap,
-    Json(request): Json<RpcRequest>,
-) -> Result<impl IntoResponse, ProxyError> {
+/// Process a single RPC request (used by both single and batch handlers)
+async fn process_single_request(
+    state: &Arc<AppState>,
+    client_ip: IpAddr,
+    auth_info: Option<(&str, &Backend)>,
+    request: &RpcRequest,
+) -> Result<Value, ProxyError> {
     let method = request.method.as_str();
-    // Get real client IP (respects X-Forwarded-For from reverse proxy)
-    let client_ip = get_real_client_ip(&headers, addr.ip());
 
-    debug!("RPC request from {}: method={}", client_ip, method);
+    // Check if this is an authenticated request
+    if let Some((user, backend)) = auth_info {
+        debug!(
+            "Authenticated request from {} (user: {}) -> {} method: {}",
+            client_ip, user, backend.url, method
+        );
 
-    // Check if client provided authentication
-    if let Some((user, password)) = parse_basic_auth(&headers) {
-        // Authenticated request - check IP whitelist first
-        if !state.config.is_ip_allowed_for_auth(&client_ip) {
-            warn!(
-                "Authenticated request from non-whitelisted IP: {} (user: {})",
-                client_ip, user
-            );
-            return Err(ProxyError::IpNotAllowed(client_ip.to_string()));
-        }
+        // Forward to specific backend with FULL access (no method filtering)
+        let backend_request = json!({
+            "method": request.method,
+            "params": request.params,
+            "id": request.id,
+        });
 
-        // Look up backend for these credentials
-        if let Some(backend) = state.config.get_backend_for_credentials(&user, &password) {
-            info!(
-                "Authenticated request from {} (user: {}) -> {} method: {}",
-                client_ip, user, backend.url, method
-            );
+        let auth_header = AppState::make_auth_header(backend);
 
-            // Forward to specific backend with FULL access (no method filtering)
-            let backend_request = json!({
-                "method": request.method,
-                "params": request.params,
-                "id": request.id,
-            });
+        let response = state
+            .client
+            .post(&backend.url)
+            .header("Content-Type", "application/json")
+            .header("Authorization", auth_header)
+            .json(&backend_request)
+            .send()
+            .await
+            .map_err(|e| ProxyError::BackendError(e.to_string()))?;
 
-            let auth_header = AppState::make_auth_header(backend);
+        let body: Value = response
+            .json()
+            .await
+            .map_err(|e| ProxyError::BackendError(e.to_string()))?;
 
-            let response = state
-                .client
-                .post(&backend.url)
-                .header("Content-Type", "application/json")
-                .header("Authorization", auth_header)
-                .json(&backend_request)
-                .send()
-                .await
-                .map_err(|e| ProxyError::BackendError(e.to_string()))?;
-
-            let body: Value = response
-                .json()
-                .await
-                .map_err(|e| ProxyError::BackendError(e.to_string()))?;
-
-            return Ok(Json(body));
-        } else {
-            warn!("Invalid credentials from {}: user={}", client_ip, user);
-            return Err(ProxyError::AuthFailed);
-        }
+        return Ok(body);
     }
 
     // Unauthenticated request - apply method filtering
@@ -287,7 +268,105 @@ pub async fn handle_rpc(
 
     debug!("Backend response received for {}", method);
 
-    Ok(Json(body))
+    Ok(body)
+}
+
+/// Handle incoming RPC requests (single or batch)
+pub async fn handle_rpc(
+    State(state): State<Arc<AppState>>,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    Json(body): Json<Value>,
+) -> Result<impl IntoResponse, ProxyError> {
+    // Get real client IP (respects X-Forwarded-For from reverse proxy)
+    let client_ip = get_real_client_ip(&headers, addr.ip());
+
+    // Check authentication once for all requests
+    let auth_info: Option<(String, Backend)> = if let Some((user, password)) = parse_basic_auth(&headers) {
+        // Authenticated request - check IP whitelist first
+        if !state.config.is_ip_allowed_for_auth(&client_ip) {
+            warn!(
+                "Authenticated request from non-whitelisted IP: {} (user: {})",
+                client_ip, user
+            );
+            return Err(ProxyError::IpNotAllowed(client_ip.to_string()));
+        }
+
+        // Look up backend for these credentials
+        if let Some(backend) = state.config.get_backend_for_credentials(&user, &password) {
+            info!(
+                "Authenticated batch/single request from {} (user: {}) -> {}",
+                client_ip, user, backend.url
+            );
+            Some((user, backend.clone()))
+        } else {
+            warn!("Invalid credentials from {}: user={}", client_ip, user);
+            return Err(ProxyError::AuthFailed);
+        }
+    } else {
+        None
+    };
+
+    // Check if this is a batch request (array) or single request (object)
+    if let Some(requests) = body.as_array() {
+        // Batch request - process each request
+        debug!("Batch RPC request from {}: {} requests", client_ip, requests.len());
+
+        let mut responses = Vec::with_capacity(requests.len());
+
+        for req_value in requests {
+            // Parse each request
+            let request: RpcRequest = match serde_json::from_value(req_value.clone()) {
+                Ok(r) => r,
+                Err(e) => {
+                    // Return error response for this request
+                    responses.push(json!({
+                        "result": null,
+                        "error": {
+                            "code": -32600,
+                            "message": format!("Invalid request: {}", e)
+                        },
+                        "id": req_value.get("id").cloned().unwrap_or(Value::Null)
+                    }));
+                    continue;
+                }
+            };
+
+            // Process the request
+            let auth_ref = auth_info.as_ref().map(|(u, b)| (u.as_str(), b));
+            match process_single_request(&state, client_ip, auth_ref, &request).await {
+                Ok(response) => responses.push(response),
+                Err(e) => {
+                    // Convert error to JSON-RPC error response
+                    let (code, message) = match &e {
+                        ProxyError::MethodNotAllowed(m) => (-32601, format!("Method not allowed: {}", m)),
+                        ProxyError::InvalidParams(m) => (-32602, m.clone()),
+                        ProxyError::BackendError(m) => (-32603, format!("Internal error: {}", m)),
+                        ProxyError::AuthFailed => (-32001, "Invalid credentials".to_string()),
+                        ProxyError::IpNotAllowed(ip) => (-32002, format!("IP {} not allowed", ip)),
+                    };
+                    responses.push(json!({
+                        "result": null,
+                        "error": { "code": code, "message": message },
+                        "id": request.id
+                    }));
+                }
+            }
+        }
+
+        Ok(Json(Value::Array(responses)))
+    } else {
+        // Single request - parse and process
+        let request: RpcRequest = serde_json::from_value(body)
+            .map_err(|e| ProxyError::InvalidParams(format!("Invalid request: {}", e)))?;
+
+        debug!("Single RPC request from {}: method={}", client_ip, request.method);
+
+        let auth_ref = auth_info.as_ref().map(|(u, b)| (u.as_str(), b));
+        let response = process_single_request(&state, client_ip, auth_ref, &request).await?;
+
+        Ok(Json(response))
+    }
 }
 
 /// Handle GET requests - show proxy info

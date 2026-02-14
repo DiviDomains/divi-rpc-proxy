@@ -1,6 +1,6 @@
 [package]
 name = "divi-rpc-proxy"
-version = "0.1.0"
+version = "0.1.2"
 edition = "2021"
 description = "Filtering RPC proxy for DIVI nodes - allows only safe read-only methods"
 authors = ["PrivateDivi"]
