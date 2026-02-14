@@ -28,13 +28,13 @@ See `src/allowlist.rs` for the complete list of allowed methods.
 
 ### From Release Binaries
 
-Download the appropriate binary for your platform from the [Releases](https://github.com/AEZ-IO/divi-rpc-proxy/releases) page.
+Download the appropriate binary for your platform from the [Releases](https://github.com/DiviDomains/divi-rpc-proxy/releases) page.
 
 ### From Source
 
 ```bash
 # Clone the repository
-git clone https://github.com/AEZ-IO/divi-rpc-proxy.git
+git clone https://github.com/DiviDomains/divi-rpc-proxy.git
 cd divi-rpc-proxy
 
 # Build release binary
